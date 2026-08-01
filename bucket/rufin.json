@@ -1,0 +1,43 @@
+{
+    "version": "0.11.1",
+    "description": "GTK music client for Jellyfin, Subsonic, Navidrome, and local libraries",
+    "homepage": "https://github.com/screwys/Rufin",
+    "license": "GPL-3.0-or-later",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/screwys/Rufin/releases/download/v0.11.1/Rufin-0.11.1-setup.exe#/setup.exe",
+            "hash": "fc46c6f6c7289a077c7b05be60e0851556034b38d707cc006571b9994c7759d8"
+        }
+    },
+    "pre_install": [
+        "if ($global) { abort 'Rufin is installed per user and cannot be installed globally.' }",
+        "if (Get-Process -Name rufin -ErrorAction SilentlyContinue) { abort 'Close Rufin before installing or updating.' }"
+    ],
+    "installer": {
+        "args": [
+            "/S"
+        ]
+    },
+    "pre_uninstall": "if (Get-Process -Name rufin -ErrorAction SilentlyContinue) { abort 'Close Rufin before updating or uninstalling.' }",
+    "uninstaller": {
+        "script": [
+            "if ($cmd -eq 'uninstall') {",
+            "    $installDir = \"$env:LOCALAPPDATA\\Programs\\Rufin\"",
+            "    $uninstaller = Join-Path $installDir 'Uninstall.exe'",
+            "    if (Test-Path $uninstaller) {",
+            "        $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru",
+            "        if ($process.ExitCode -ne 0) { abort 'Rufin could not be uninstalled.' }",
+            "    }",
+            "    if (Test-Path $installDir) { abort 'The Rufin install directory was not removed.' }",
+            "}"
+        ]
+    },
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/screwys/Rufin/releases/download/v$version/Rufin-$version-setup.exe#/setup.exe"
+            }
+        }
+    }
+}

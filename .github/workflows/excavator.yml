@@ -1,0 +1,57 @@
+name: Update Manifests
+
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-manifests
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Update Manifests
+        uses: ScoopInstaller/GithubActions@720646f3a790879c1e6849fc700bea99a0d00766
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SKIP_UPDATED: "1"
+          THROW_ERROR: "1"
+
+      - name: Verify Rufin Install
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
+          scoop bucket add rufin-test https://github.com/screwys/scoop-bucket
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not add the Rufin bucket"
+          }
+
+          scoop install rufin-test/rufin
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not install Rufin through Scoop"
+          }
+
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\Rufin"
+          if (-not (Test-Path (Join-Path $installDir "bin\rufin.exe"))) {
+            throw "The Rufin executable was not installed"
+          }
+
+          scoop uninstall rufin
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not uninstall Rufin through Scoop"
+          }
+          if (Test-Path $installDir) {
+            throw "The Rufin install directory was not removed"
+          }

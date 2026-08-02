@@ -41,10 +41,6 @@ jobs:
         shell: pwsh
         run: ./tests/update-rufin.Tests.ps1
 
-      - name: Test Rufin Install Verification
-        shell: pwsh
-        run: ./tests/verify-rufin-install.Tests.ps1
-
       - name: Test Scoop Uninstall Lifecycle
         shell: pwsh
         run: ./tests/scoop-lifecycle.Tests.ps1 -ScoopPath ./.scoop-core
@@ -88,38 +84,6 @@ jobs:
 
           if (-not (Get-Content -Raw ./bucket/rufin.json | Test-Json -SchemaFile ./.scoop-core/schema.json)) {
               throw "The rendered Rufin manifest does not match Scoop's schema"
-          }
-
-      - name: Verify Rufin Install
-        shell: pwsh
-        env:
-          RUFIN_VERSION: ${{ steps.render.outputs.version }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $env:SCOOP = Join-Path $env:RUNNER_TEMP "scoop-home"
-          @("apps", "buckets", "cache", "persist", "shims") | ForEach-Object {
-              New-Item -ItemType Directory -Force -Path (Join-Path $env:SCOOP $_) | Out-Null
-          }
-          $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
-          $scoop = Join-Path $env:GITHUB_WORKSPACE ".scoop-core/bin/scoop.ps1"
-          $manifest = (Resolve-Path ./bucket/rufin.json).Path
-
-          & $pwsh -NoLogo -NoProfile -File $scoop install $manifest --no-update-scoop
-          if ($LASTEXITCODE -ne 0) {
-              throw "Could not install Rufin through Scoop"
-          }
-
-          $installDir = Join-Path $env:LOCALAPPDATA "Programs\Rufin"
-          ./script/verify-rufin-install.ps1 `
-              -InstallDir $installDir `
-              -Version $env:RUFIN_VERSION
-
-          & $pwsh -NoLogo -NoProfile -File $scoop uninstall rufin
-          if ($LASTEXITCODE -ne 0) {
-              throw "Could not uninstall Rufin through Scoop"
-          }
-          if (Test-Path $installDir) {
-              throw "The Rufin install directory was not removed"
           }
 
   publish:

@@ -1,0 +1,14 @@
+{
+  "tag_name": "v1.2.3",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "name": "Rufin-1.2.3-setup.exe",
+      "browser_download_url": "https://github.com/screwys/Rufin/releases/download/v1.2.3/Rufin-1.2.3-setup.exe",
+      "state": "uploaded",
+      "size": 123456,
+      "digest": "sha256:not-a-digest"
+    }
+  ]
+}

@@ -15,7 +15,8 @@
     ],
     "installer": {
         "args": [
-            "/S"
+            "/S",
+            "/RUFINCHANNEL=scoop"
         ]
     },
     "pre_uninstall": "if (Get-Process -Name rufin -ErrorAction SilentlyContinue) { abort 'Close Rufin before updating or uninstalling.' }",
@@ -24,8 +25,10 @@
             "if ($cmd -eq 'uninstall') {",
             "    $installDir = \"$env:LOCALAPPDATA\\Programs\\Rufin\"",
             "    $uninstaller = Join-Path $installDir 'Uninstall.exe'",
+            "    $uninstallArgs = @('/S')",
+            "    if ($purge) { $uninstallArgs += '/PURGE' }",
             "    if (Test-Path $uninstaller) {",
-            "        $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru",
+            "        $process = Start-Process -FilePath $uninstaller -ArgumentList $uninstallArgs -Wait -PassThru",
             "        if ($process.ExitCode -ne 0) { abort 'Rufin could not be uninstalled.' }",
             "    }",
             "    if (Test-Path $installDir) { abort 'The Rufin install directory was not removed.' }",

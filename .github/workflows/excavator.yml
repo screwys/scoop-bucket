@@ -4,54 +4,211 @@ on:
   schedule:
     - cron: "37 */6 * * *"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Rufin release tag to publish
+        required: false
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: update-manifests
   cancel-in-progress: false
 
 jobs:
-  update:
+  validate:
     if: github.ref == 'refs/heads/main'
     runs-on: windows-latest
     timeout-minutes: 15
+    outputs:
+      hash: ${{ steps.render.outputs.hash }}
+      tag: ${{ steps.render.outputs.tag }}
+      version: ${{ steps.render.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
-      - name: Update Manifests
-        uses: ScoopInstaller/GithubActions@720646f3a790879c1e6849fc700bea99a0d00766
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          SKIP_UPDATED: "1"
-          THROW_ERROR: "1"
+      - name: Check Out Scoop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ScoopInstaller/Scoop
+          ref: b588a06e41d920d2123ec70aee682bae14935939
+          path: .scoop-core
+          persist-credentials: false
 
-      - name: Verify Rufin Install
-        if: github.event_name == 'workflow_dispatch'
+      - name: Test Rufin Manifest Renderer
         shell: pwsh
+        run: ./tests/update-rufin.Tests.ps1
+
+      - name: Test Rufin Install Verification
+        shell: pwsh
+        run: ./tests/verify-rufin-install.Tests.ps1
+
+      - name: Test Scoop Uninstall Lifecycle
+        shell: pwsh
+        run: ./tests/scoop-lifecycle.Tests.ps1 -ScoopPath ./.scoop-core
+
+      - name: Render Rufin Manifest
+        id: render
+        shell: pwsh
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           $ErrorActionPreference = "Stop"
-          $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
-          scoop bucket add rufin-test https://github.com/screwys/scoop-bucket
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not add the Rufin bucket"
+          $releasePath = Join-Path $env:RUNNER_TEMP "rufin-release.json"
+          $headers = @{
+              Accept = "application/vnd.github+json"
+              "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          if ($env:GITHUB_EVENT_NAME -eq "schedule") {
+              $releaseUrl = "https://api.github.com/repos/screwys/Rufin/releases/latest"
+          } else {
+              $requestedTag = ([string] $env:REQUESTED_TAG).Trim()
+              if (-not $requestedTag) {
+                  $currentVersion = (Get-Content -Raw -LiteralPath ./bucket/rufin.json | ConvertFrom-Json).version
+                  $requestedTag = "v$currentVersion"
+              }
+              if ($requestedTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+                  throw "The requested Rufin tag is invalid: $requestedTag"
+              }
+              $releaseUrl = "https://api.github.com/repos/screwys/Rufin/releases/tags/$requestedTag"
+          }
+          Invoke-WebRequest `
+              -Uri $releaseUrl `
+              -Headers $headers `
+              -UserAgent "screwys/scoop-bucket" `
+              -OutFile $releasePath
+
+          $renderParameters = @{
+              ReleasePath = $releasePath
+              ManifestPath = "./bucket/rufin.json"
+          }
+          if ($env:GITHUB_EVENT_NAME -ne "schedule") {
+              $renderParameters.ExpectedTag = $requestedTag
+          }
+          $result = ./script/update-rufin.ps1 @renderParameters
+          "hash=$($result.Hash)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=$($result.Tag)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$($result.Version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "changed=$($result.Changed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          if (-not (Get-Content -Raw ./bucket/rufin.json | Test-Json -SchemaFile ./.scoop-core/schema.json)) {
+              throw "The rendered Rufin manifest does not match Scoop's schema"
           }
 
-          scoop install rufin-test/rufin
+      - name: Verify Rufin Install
+        if: github.event_name == 'workflow_dispatch' || steps.render.outputs.changed == 'true'
+        shell: pwsh
+        env:
+          RUFIN_VERSION: ${{ steps.render.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:SCOOP = Join-Path $env:RUNNER_TEMP "scoop-home"
+          $scoop = Join-Path $env:GITHUB_WORKSPACE ".scoop-core/bin/scoop.ps1"
+          $manifest = (Resolve-Path ./bucket/rufin.json).Path
+
+          & $scoop install $manifest
           if ($LASTEXITCODE -ne 0) {
-            throw "Could not install Rufin through Scoop"
+              throw "Could not install Rufin through Scoop"
           }
 
           $installDir = Join-Path $env:LOCALAPPDATA "Programs\Rufin"
-          if (-not (Test-Path (Join-Path $installDir "bin\rufin.exe"))) {
-            throw "The Rufin executable was not installed"
-          }
+          ./script/verify-rufin-install.ps1 `
+              -InstallDir $installDir `
+              -Version $env:RUFIN_VERSION
 
-          scoop uninstall rufin
+          & $scoop uninstall rufin
           if ($LASTEXITCODE -ne 0) {
-            throw "Could not uninstall Rufin through Scoop"
+              throw "Could not uninstall Rufin through Scoop"
           }
           if (Test-Path $installDir) {
-            throw "The Rufin install directory was not removed"
+              throw "The Rufin install directory was not removed"
+          }
+
+  publish:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Publish Rufin Manifest
+        shell: pwsh
+        env:
+          RUFIN_HASH: ${{ needs.validate.outputs.hash }}
+          RUFIN_TAG: ${{ needs.validate.outputs.tag }}
+          RUFIN_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:RUFIN_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+              throw "The validated Rufin tag is invalid: $env:RUFIN_TAG"
+          }
+
+          $releasePath = Join-Path $env:RUNNER_TEMP "rufin-release.json"
+          $headers = @{
+              Accept = "application/vnd.github+json"
+              "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          Invoke-WebRequest `
+              -Uri "https://api.github.com/repos/screwys/Rufin/releases/tags/$env:RUFIN_TAG" `
+              -Headers $headers `
+              -UserAgent "screwys/scoop-bucket" `
+              -OutFile $releasePath
+
+          $result = ./script/update-rufin.ps1 `
+              -ReleasePath $releasePath `
+              -ManifestPath ./bucket/rufin.json `
+              -ExpectedTag $env:RUFIN_TAG
+          if ($result.Version -cne $env:RUFIN_VERSION) {
+              throw "The validated Rufin version changed before publication"
+          }
+          if ($result.Hash -cne $env:RUFIN_HASH) {
+              throw "The validated Rufin installer changed before publication"
+          }
+
+          $changedPaths = @(
+              @(git diff --name-only --)
+              @(git ls-files --others --exclude-standard)
+          ) | Where-Object { $_ }
+          $unexpectedPaths = @($changedPaths | Where-Object { $_ -cne 'bucket/rufin.json' })
+          if ($unexpectedPaths.Count -ne 0) {
+              throw "The updater changed unexpected paths: $($unexpectedPaths -join ', ')"
+          }
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) {
+              throw "The rendered manifest has whitespace errors"
+          }
+
+          git diff --quiet -- bucket/rufin.json
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "Rufin is already at $($result.Version)"
+              exit 0
+          }
+          if ($LASTEXITCODE -ne 1) {
+              throw "Could not inspect the Rufin manifest diff"
+          }
+
+          git add -- bucket/rufin.json
+          $stagedPaths = @(git diff --cached --name-only --)
+          if ($stagedPaths.Count -ne 1 -or $stagedPaths[0] -cne 'bucket/rufin.json') {
+              throw "Only bucket/rufin.json may be published"
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update Rufin to $($result.Version)"
+          if ($LASTEXITCODE -ne 0) {
+              throw "Could not commit the Rufin manifest"
+          }
+
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) {
+              throw "Could not publish the Rufin manifest"
           }

@@ -97,11 +97,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $env:SCOOP = Join-Path $env:RUNNER_TEMP "scoop-home"
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:SCOOP "shims") | Out-Null
+          @("apps", "buckets", "cache", "persist", "shims") | ForEach-Object {
+              New-Item -ItemType Directory -Force -Path (Join-Path $env:SCOOP $_) | Out-Null
+          }
+          $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
           $scoop = Join-Path $env:GITHUB_WORKSPACE ".scoop-core/bin/scoop.ps1"
           $manifest = (Resolve-Path ./bucket/rufin.json).Path
 
-          & $scoop install $manifest --no-update-scoop
+          & $pwsh -NoLogo -NoProfile -File $scoop install $manifest --no-update-scoop
           if ($LASTEXITCODE -ne 0) {
               throw "Could not install Rufin through Scoop"
           }
@@ -111,7 +114,7 @@ jobs:
               -InstallDir $installDir `
               -Version $env:RUFIN_VERSION
 
-          & $scoop uninstall rufin
+          & $pwsh -NoLogo -NoProfile -File $scoop uninstall rufin
           if ($LASTEXITCODE -ne 0) {
               throw "Could not uninstall Rufin through Scoop"
           }

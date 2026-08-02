@@ -1,12 +1,10 @@
 name: Update Manifests
 
 on:
-  schedule:
-    - cron: "37 */6 * * *"
   workflow_dispatch:
     inputs:
       tag:
-        description: Rufin release tag to publish
+        description: Rufin release tag to publish, such as v0.12.0. Leave blank to test the current manifest.
         required: false
         type: string
 
@@ -63,19 +61,15 @@ jobs:
               Accept = "application/vnd.github+json"
               "X-GitHub-Api-Version" = "2022-11-28"
           }
-          if ($env:GITHUB_EVENT_NAME -eq "schedule") {
-              $releaseUrl = "https://api.github.com/repos/screwys/Rufin/releases/latest"
-          } else {
-              $requestedTag = ([string] $env:REQUESTED_TAG).Trim()
-              if (-not $requestedTag) {
-                  $currentVersion = (Get-Content -Raw -LiteralPath ./bucket/rufin.json | ConvertFrom-Json).version
-                  $requestedTag = "v$currentVersion"
-              }
-              if ($requestedTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
-                  throw "The requested Rufin tag is invalid: $requestedTag"
-              }
-              $releaseUrl = "https://api.github.com/repos/screwys/Rufin/releases/tags/$requestedTag"
+          $requestedTag = ([string] $env:REQUESTED_TAG).Trim()
+          if (-not $requestedTag) {
+              $currentVersion = (Get-Content -Raw -LiteralPath ./bucket/rufin.json | ConvertFrom-Json).version
+              $requestedTag = "v$currentVersion"
           }
+          if ($requestedTag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+              throw "The requested Rufin tag is invalid: $requestedTag"
+          }
+          $releaseUrl = "https://api.github.com/repos/screwys/Rufin/releases/tags/$requestedTag"
           Invoke-WebRequest `
               -Uri $releaseUrl `
               -Headers $headers `
@@ -86,31 +80,28 @@ jobs:
               ReleasePath = $releasePath
               ManifestPath = "./bucket/rufin.json"
           }
-          if ($env:GITHUB_EVENT_NAME -ne "schedule") {
-              $renderParameters.ExpectedTag = $requestedTag
-          }
+          $renderParameters.ExpectedTag = $requestedTag
           $result = ./script/update-rufin.ps1 @renderParameters
           "hash=$($result.Hash)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "tag=$($result.Tag)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "version=$($result.Version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "changed=$($result.Changed.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
           if (-not (Get-Content -Raw ./bucket/rufin.json | Test-Json -SchemaFile ./.scoop-core/schema.json)) {
               throw "The rendered Rufin manifest does not match Scoop's schema"
           }
 
       - name: Verify Rufin Install
-        if: github.event_name == 'workflow_dispatch' || steps.render.outputs.changed == 'true'
         shell: pwsh
         env:
           RUFIN_VERSION: ${{ steps.render.outputs.version }}
         run: |
           $ErrorActionPreference = "Stop"
           $env:SCOOP = Join-Path $env:RUNNER_TEMP "scoop-home"
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:SCOOP "shims") | Out-Null
           $scoop = Join-Path $env:GITHUB_WORKSPACE ".scoop-core/bin/scoop.ps1"
           $manifest = (Resolve-Path ./bucket/rufin.json).Path
 
-          & $scoop install $manifest
+          & $scoop install $manifest --no-update-scoop
           if ($LASTEXITCODE -ne 0) {
               throw "Could not install Rufin through Scoop"
           }

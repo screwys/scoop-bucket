@@ -1,12 +1,12 @@
 {
-    "version": "0.12.0",
+    "version": "0.12.5",
     "description": "GTK music client for Jellyfin, Subsonic, Navidrome, and local libraries",
     "homepage": "https://github.com/screwys/Rufin",
     "license": "GPL-3.0-or-later",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/screwys/Rufin/releases/download/v0.12.0/Rufin-0.12.0-setup.exe#/setup.exe",
-            "hash": "6fbe969e67342440591c689280c3d9db1b4b9824cc22af0077d650d3ef482ea6"
+            "url": "https://github.com/screwys/Rufin/releases/download/v0.12.5/Rufin-0.12.5-setup.exe#/setup.exe",
+            "hash": "98e83cb0c9e1f41af05f1b6642ca57e9f7255cf3c5d32c3ffc4639724a3c2367"
         }
     },
     "pre_install": [
